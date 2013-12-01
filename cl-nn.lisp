@@ -87,6 +87,22 @@
 
     (make-network (list num-inputs num-hidden num-outputs) :weights weights)))
 
+(defun write-network (network filename)
+  (with-open-file (out filename :direction :output
+                                :if-exists :supersede
+                                :if-does-not-exist :create)
+    (let ((sizes (map 'list #'length network))
+          (weights (map 'list
+                        #'(lambda (layer)
+                            (map 'list
+                                 #'(lambda (neuron)
+                                     (cons (neuron-bias-weight neuron)
+                                           (coerce (neuron-in-weights neuron) 'list)))
+                                 layer))
+                        (subseq network 1))))       ; skip the input layer
+      (format out "~{~d~^ ~}~%" sizes)
+      (format out "~{~{~{~,3f~^ ~}~%~}~}" weights))))
+
 (defun load-data (filename)
   (let ((in (open filename))
         (num-examples)
@@ -116,37 +132,123 @@
       (push (list inputs outputs) examples))
     (reverse examples)))
 
+(defun set-inputs (network datum)
+  (map nil #'(lambda (neuron x)
+               (setf (neuron-a neuron) x))
+       (elt network 0) (car datum)))
 
-(defun back-prop-learning (training-data network &key (alpha 0.1) (epochs 100))
-  "Train NETWORK on TRAINING-DATA using back-propogation. Training
-  data is in the form ((inputs) (outputs))."
+(defun forward-prop (network)
+  (let ((num-layers (length network)))
+    (map-iota #'(lambda (n)
+                  (let ((layer (elt network n))
+                        (prev-layer (elt network (1- n)))
+                        (i 0))
+                    (dolist (neuron layer)
+                      (setf (neuron-in neuron)
+                            (* (neuron-fixed-input neuron)
+                               (neuron-bias-weight neuron)))
+                      (setf i 0)
+                      (dolist (input-neuron prev-layer)
+                        (incf (neuron-in neuron)
+                              (* (elt (neuron-in-weights neuron) i)
+                                 (neuron-a input-neuron)))
+                        (incf i))
+                      (setf (neuron-a neuron)
+                            (funcall (neuron-g neuron) (neuron-in neuron))))))
+              (1- num-layers) :start 1)))
+
+(defun write-results (metrics filename)
+  (with-open-file (out filename :direction :output
+                                :if-exists :supersede
+                                :if-does-not-exist :create)
+    (setf metrics
+          (mapcar #'(lambda (metric)
+                      (let* ((a (first metric))
+                             (b (second metric))
+                             (c (third metric))
+                             (d (fourth metric))
+                             (accuracy (/ (+ a d) (+ a b c d)))
+                             (precision (/ a (+ a b)))
+                             (recall (/ a (+ a c)))
+                             (f1 (/ (* 2 precision recall) (+ precision recall))))
+                        (list a b c d accuracy precision recall f1)))
+                  metrics))
+
+    (format out "~{~{~d ~d ~d ~d ~,3f ~,3f ~,3f ~,3f~%~}~}"
+            metrics)
+
+    ;; micro-averaging
+    (let* ((a (reduce #'+ metrics :key #'first))
+           (b (reduce #'+ metrics :key #'second))
+           (c (reduce #'+ metrics :key #'third))
+           (d (reduce #'+ metrics :key #'fourth))
+           (accuracy (/ (+ a d) (+ a b c d)))
+           (precision (/ a (+ a b)))
+           (recall (/ a (+ a c)))
+           (f1 (/ (* 2 precision recall) (+ precision recall))))
+      (format out "~,3f ~,3f ~,3f ~,3f~%" accuracy precision recall f1))
+
+    ;; macro-averaging
+    (let* ((num-classes (length metrics))
+           (accuracy (/ (reduce #'+ metrics :key #'fifth) num-classes))
+           (precision (/ (reduce #'+ metrics :key #'sixth) num-classes))
+           (recall (/ (reduce #'+ metrics :key #'seventh) num-classes))
+           (f1 (/ (* 2 precision recall) (+ precision recall))))
+      (format out "~,3f ~,3f ~,3f ~,3f~%" accuracy precision recall f1))))
+
+(defun think (network data &key (boolean-output nil))
+  "Apply (presumable trained) NETWORK to DATA. Data is in the
+  form ((inputs) (outputs)). Return a list of lists, where each inner
+  list contains the outputs for a datum. If the output data is
+  epxected to be boolean, also return a list of lists, where each
+  inner list is (A B C D), the confusion matrix values, for one of the
+  output classes."
+  (let ((results)
+        (metrics))
+    (dolist (datum data)
+      ;; set input layer outputs
+      (set-inputs network datum)
+      ;; propogate inputs forward
+      (forward-prop network)
+      (push (map 'list #'neuron-a
+                 (elt network (1- (length network)))) results))
+    (setf results (reverse results))
+
+    (if boolean-output
+        (let ((expected-results (mapcar #'cadr data)))
+          (setf results (mapcar #'(lambda (res)
+                                    (mapcar #'round res)) results))
+          (setf metrics
+                ; count each symbol (A, B, C, or D) for each class
+                (mapcar #'(lambda (class-results)
+                            (list (count 'a class-results)
+                                  (count 'b class-results)
+                                  (count 'c class-results)
+                                  (count 'd class-results)))
+                        (apply #'mapcar #'list              ; zip (transpose) lists
+                               ;; replace outupt with symbol representing which count it
+                               ;; should be added to (A, B, C, or D) for its class
+                               (mapcar #'(lambda (result expected-result)
+                                           (mapcar #'(lambda (r e-r)
+                                                       (cond ((= 1 r e-r) 'a)
+                                                             ((> r e-r) 'b)
+                                                             ((< r e-r) 'c)
+                                                             ((= 0 r e-r) 'd)))
+                                                   result expected-result))
+                                       results expected-results))))))
+  (values results metrics)))
+
+(defun learn (network training-data &key (alpha 0.1) (epochs 100))
+  "Train NETWORK on TRAINING-DATA using back-propogation. DATA is in
+   the form ((inputs) (outputs))."
   (do ((num-layers (length network))
        (epoch 0 (1+ epoch)))
       ((= epoch epochs) network)
     (dolist (datum training-data)
       ;; set input layer outputs
-      (map nil #'(lambda (neuron x)
-                   (setf (neuron-a neuron) x))
-           (aref network 0) (car datum))
+      (set-inputs network datum)
       ;; propogate inputs forward
-      (map-iota #'(lambda (n)
-                    ;; (print n)
-                    (let ((layer (elt network n))
-                          (prev-layer (elt network (1- n)))
-                          (i 0))
-                      (dolist (neuron layer)
-                        (setf (neuron-in neuron)
-                              (* (neuron-fixed-input neuron)
-                                 (neuron-bias-weight neuron)))
-                        (setf i 0)
-                        (dolist (input-neuron prev-layer)
-                          (incf (neuron-in neuron)
-                                (* (elt (neuron-in-weights neuron) i)
-                                   (neuron-a input-neuron)))
-                          (incf i))
-                        (setf (neuron-a neuron)
-                              (funcall (neuron-g neuron) (neuron-in neuron))))))
-                (1- num-layers) :start 1)
+      (forward-prop network)
       ;; set output layer deltas
       (map nil #'(lambda (neuron y)
                    (setf (neuron-delta neuron)
