@@ -10,13 +10,13 @@
   ;; A vector input weights. The ith weight corresponds to the ith
   ;; neuron in the previous layer.
   in-weights
-  (bias-weight 1.0 :type double-float)
-  (fixed-input 1.0 :type double-float)
+  (bias-weight 1.0d0 :type double-float)
+  (fixed-input 1.0d0 :type double-float)
   g                                  ; activation function
   dg                                 ; derivative of activation function
-  (in 1.0 :type double-float)        ; weighted sum of of inputs
-  (a 1.0 :type double-float)         ; output; a = g(in)
-  (delta 0.0 :type double-float))    ; delta for backpropogation
+  (in 1.0d0 :type double-float)        ; weighted sum of of inputs
+  (a 1.0d0 :type double-float)         ; output; a = g(in)
+  (delta 0.0d0 :type double-float))    ; delta for backpropogation
 
 (defun sigmoid (x)
   (/ 1 (1+ (exp (- x)))))
@@ -25,7 +25,7 @@
   (let ((y (sigmoid x)))
     (* (- 1 y) y)))
 
-(defun make-network (sizes &key (g #'sigmoid) (dg #'dsigmoid) (fixed-input -1.0) (weights))
+(defun make-network (sizes &key (g #'sigmoid) (dg #'dsigmoid) (fixed-input -1.0d0) (weights))
   "Respresent network as a vector of lists, where each list represents a layer."
   (let ((network))
     (do* ((prev-size nil (car sizes))
@@ -34,14 +34,14 @@
           (layer () ()))
          ((null size))
       (dotimes (i size)
-        (let ((in-weights (make-array prev-size :element-type 'double-float :initial-element 0.0))
-              (bias-weight 1.0))
+        (let ((in-weights (make-array prev-size :element-type 'double-float :initial-element 0.0d0))
+              (bias-weight 1.0d0))
           (if prev-size
               (progn
                 (if weights (setf bias-weight (pop weights)))
                 (dotimes (n prev-size)
                   (setf (elt in-weights n)
-                        (if weights (pop weights) (random 0.1))))))
+                        (if weights (pop weights) (random 0.1d0))))))
           (push (make-neuron :in-weights in-weights :g g :dg dg :in fixed-input
                              :fixed-input fixed-input :bias-weight bias-weight)
                 layer)))
@@ -221,7 +221,7 @@
                               (neuron-in-weights output-neuron) layer))))))))
     (backprop (cdr network) network datum alpha :depth 0)))
 
-(defun learn (network data &key (alpha 0.1) (epochs 100))
+(defun learn (network data &key (alpha 0.1d0) (epochs 100))
   "Train NETWORK on DATA using backpropogation. DATA is in the
    form ((inputs) (outputs)). NETWORK is modified."
   (do ((epoch 0 (1+ epoch)))
