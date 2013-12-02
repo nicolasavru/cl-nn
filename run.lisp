@@ -10,23 +10,36 @@
       (data)
       (alpha)
       (epochs)
-      (training-p))
+      (training-p)
+      (sizes))
   (setf training-p (y-or-n-p "Train a neural network?"))
 
-  (format *query-io* "Enter the neural network file: ")
-  (force-output *query-io*)
-  (setf net-fname (read-line *query-io*))
+  (if (and training-p (y-or-n-p "Generate a neural network?"))
+      (progn
+          (format *query-io* "Enter the neural network output file: ")
+          (force-output *query-io*)
+          (setf net-fname (read-line *query-io*))
+
+          (format *query-io* "Enter a list of sizes for the network (ex: (3 2 3)): ")
+          (force-output *query-io*)
+          (setf sizes (read-from-string (read-line *query-io*)))
+
+          (setf net (make-network sizes))
+          (write-network net net-fname))
+      (progn
+        (format *query-io* "Enter the neural network input file: ")
+        (force-output *query-io*)
+        (setf net-fname (read-line *query-io*))
+        (setf net (load-network net-fname))))
 
   (format *query-io* "Enter the data file: ")
   (force-output *query-io*)
   (setf data-fname (read-line *query-io*))
+  (setf data (load-data data-fname))
 
   (format *query-io* "Enter the output file: ")
   (force-output *query-io*)
   (setf output-fname (read-line *query-io*))
-
-  (setf net (load-network net-fname))
-  (setf data (load-data data-fname))
 
   (if training-p
       (progn 

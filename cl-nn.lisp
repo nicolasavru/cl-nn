@@ -26,7 +26,8 @@
     (* (- 1 y) y)))
 
 (defun make-network (sizes &key (g #'sigmoid) (dg #'dsigmoid) (fixed-input -1.0d0) (weights))
-  "Respresent network as a vector of lists, where each list represents a layer."
+  "Create a new neural network. Respresent the network as a list of
+   lists of neurons, where each list represents a layer."
   (let ((network))
     (do* ((prev-size nil (car sizes))
           (sizes sizes (cdr sizes))
