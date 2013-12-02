@@ -35,13 +35,13 @@
          ((null size))
       (dotimes (i size)
         (let ((in-weights (make-array prev-size :element-type 'double-float :initial-element 0.0d0))
-              (bias-weight 1.0d0))
+              (bias-weight (- (random 1.0d0) 0.5)))
           (if prev-size
               (progn
                 (if weights (setf bias-weight (pop weights)))
                 (dotimes (n prev-size)
                   (setf (elt in-weights n)
-                        (if weights (pop weights) (random 0.1d0))))))
+                        (if weights (pop weights) (- (random 1.0d0) 0.5))))))
           (push (make-neuron :in-weights in-weights :g g :dg dg :in fixed-input
                              :fixed-input fixed-input :bias-weight bias-weight)
                 layer)))
@@ -149,7 +149,7 @@
   "Set outputs of input layer neurons in NETWORK to DATUM. DATUM is in
   the form ((inputs) (outputs)) and has length 1. NETWORK is modified."
   (mapc #'(lambda (neuron x)
-            (setf (neuron-a neuron) x))
+            (setf (neuron-a neuron) (coerce x 'double-float)))
         (car network) (car datum)))
 
 (defun compute-layer-output (layer prev-layer)
