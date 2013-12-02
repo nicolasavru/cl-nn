@@ -4,22 +4,19 @@
 
 ;;; "cl-nn" goes here. Hacks and glory await!
 
+(setf *READ-DEFAULT-FLOAT-FORMAT* 'double-float)
+
 (defstruct neuron
   ;; A vector input weights. The ith weight corresponds to the ith
   ;; neuron in the previous layer.
   in-weights
-  bias-weight
-  fixed-input
-  ;; activation function
-  g
-  ;; derivative of activation function
-  dg
-  ;; weighted sum of of inputs
-  (in 1.0 :type float)
-  ;; output; a = g(in)
-  (a 1.0 :type float)
-  ;; delta for back-propogation
-  (delta 0.0 :type float))
+  (bias-weight 1.0 :type double-float)
+  (fixed-input 1.0 :type double-float)
+  g                                  ; activation function
+  dg                                 ; derivative of activation function
+  (in 1.0 :type double-float)        ; weighted sum of of inputs
+  (a 1.0 :type double-float)         ; output; a = g(in)
+  (delta 0.0 :type double-float))    ; delta for backpropogation
 
 (defun sigmoid (x)
   (/ 1 (1+ (exp (- x)))))
@@ -30,28 +27,31 @@
 
 (defun make-network (sizes &key (g #'sigmoid) (dg #'dsigmoid) (fixed-input -1.0) (weights))
   "Respresent network as a vector of lists, where each list represents a layer."
-  (let ((network (make-array (length sizes) :element-type 'list :initial-element nil))
-        (pos 0))
+  (let ((network))
     (do* ((prev-size nil (car sizes))
           (sizes sizes (cdr sizes))
           (size (car sizes) (car sizes))
           (layer () ()))
          ((null size))
       (dotimes (i size)
-        (let ((in-weights (make-array prev-size :element-type 'float :initial-element 0.0))
-              (bias-weight))
+        (let ((in-weights (make-array prev-size :element-type 'double-float :initial-element 0.0))
+              (bias-weight 1.0))
           (if prev-size
               (progn
-                (setf bias-weight (pop weights))
+                (if weights (setf bias-weight (pop weights)))
                 (dotimes (n prev-size)
-                  (setf (aref in-weights n)
+                  (setf (elt in-weights n)
                         (if weights (pop weights) (random 0.1))))))
           (push (make-neuron :in-weights in-weights :g g :dg dg :in fixed-input
                              :fixed-input fixed-input :bias-weight bias-weight)
                 layer)))
-      (setf (aref network pos) (reverse layer))
-      (incf pos))
-    network))
+      (push (reverse layer) network))
+    (reverse network)))
+
+(defun string-to-list (str)
+  "Convert a string of whitespace-separated values to a list."
+  (read-from-string
+   (concatenate 'string "(" (string-trim '(#\Return) str) ")")))
 
 (defun load-network (filename)
   (let ((in (open filename))
@@ -60,29 +60,13 @@
         (num-outputs)
         (line)
         (weights))
-    (setf line
-          (read-from-string (concatenate 'string
-                                         "("
-                                         (string-trim '(#\Return) (read-line in))
-                                         ")")))
-    (setf num-inputs (first line))
-    (setf num-hidden (second line))
-    (setf num-outputs (third line))
+    (setf line (string-to-list (read-line in)))
+    (setf num-inputs (first line)
+          num-hidden (second line)
+          num-outputs (third line))
 
-    (dotimes (n num-hidden)
-      (setf line
-            (read-from-string (concatenate 'string
-                                           "("
-                                           (string-trim '(#\Return) (read-line in))
-                                           ")")))
-      (setf weights (append weights line)))
-
-    (dotimes (n num-outputs)
-      (setf line
-            (read-from-string (concatenate 'string
-                                           "("
-                                           (string-trim '(#\Return) (read-line in))
-                                           ")")))
+    (dotimes (n (+ num-hidden num-outputs))
+      (setf line (string-to-list (read-line in)))
       (setf weights (append weights line)))
 
     (make-network (list num-inputs num-hidden num-outputs) :weights weights)))
@@ -91,15 +75,13 @@
   (with-open-file (out filename :direction :output
                                 :if-exists :supersede
                                 :if-does-not-exist :create)
-    (let ((sizes (map 'list #'length network))
-          (weights (map 'list
-                        #'(lambda (layer)
-                            (map 'list
-                                 #'(lambda (neuron)
-                                     (cons (neuron-bias-weight neuron)
-                                           (coerce (neuron-in-weights neuron) 'list)))
-                                 layer))
-                        (subseq network 1))))       ; skip the input layer
+    (let ((sizes (mapcar #'length network))
+          (weights (mapcar #'(lambda (layer)
+                               (mapcar #'(lambda (neuron)
+                                           (cons (neuron-bias-weight neuron)
+                                                 (coerce (neuron-in-weights neuron) 'list)))
+                                       layer))
+                           (cdr network))))       ; skip the input layer
       (format out "~{~d~^ ~}~%" sizes)
       (format out "~{~{~{~,3f~^ ~}~%~}~}" weights))))
 
@@ -112,50 +94,17 @@
         (examples)
         (inputs)
         (outputs))
-    (setf line
-          (read-from-string (concatenate 'string
-                                         "("
-                                         (string-trim '(#\Return) (read-line in))
-                                         ")")))
-    (setf num-examples (first line))
-    (setf num-inputs (second line))
-    (setf num-outputs (third line))
+    (setf line (string-to-list (read-line in)))
+    (setf num-examples (first line)
+          num-inputs (second line)
+          num-outputs (third line))
 
     (dotimes (n num-examples)
-      (setf line
-            (read-from-string (concatenate 'string
-                                           "("
-                                           (string-trim '(#\Return) (read-line in))
-                                           ")")))
-      (setf inputs (subseq line 0 num-inputs))
-      (setf outputs (subseq line num-inputs))
+      (setf line (string-to-list (read-line in)))
+      (setf inputs (subseq line 0 num-inputs)
+            outputs (subseq line num-inputs))
       (push (list inputs outputs) examples))
     (reverse examples)))
-
-(defun set-inputs (network datum)
-  (map nil #'(lambda (neuron x)
-               (setf (neuron-a neuron) x))
-       (elt network 0) (car datum)))
-
-(defun forward-prop (network)
-  (let ((num-layers (length network)))
-    (map-iota #'(lambda (n)
-                  (let ((layer (elt network n))
-                        (prev-layer (elt network (1- n)))
-                        (i 0))
-                    (dolist (neuron layer)
-                      (setf (neuron-in neuron)
-                            (* (neuron-fixed-input neuron)
-                               (neuron-bias-weight neuron)))
-                      (setf i 0)
-                      (dolist (input-neuron prev-layer)
-                        (incf (neuron-in neuron)
-                              (* (elt (neuron-in-weights neuron) i)
-                                 (neuron-a input-neuron)))
-                        (incf i))
-                      (setf (neuron-a neuron)
-                            (funcall (neuron-g neuron) (neuron-in neuron))))))
-              (1- num-layers) :start 1)))
 
 (defun write-results (metrics filename)
   (with-open-file (out filename :direction :output
@@ -196,6 +145,91 @@
            (f1 (/ (* 2 precision recall) (+ precision recall))))
       (format out "~,3f ~,3f ~,3f ~,3f~%" accuracy precision recall f1))))
 
+(defun set-inputs (network datum)
+  "Set outputs of input layer neurons in NETWORK to DATUM. DATUM is in
+  the form ((inputs) (outputs)) and has length 1. NETWORK is modified."
+  (mapc #'(lambda (neuron x)
+            (setf (neuron-a neuron) x))
+        (car network) (car datum)))
+
+(defun compute-layer-output (layer prev-layer)
+  "Compute output of LAYER. LAYER is modified."
+  (dolist (neuron layer)
+    (setf (neuron-in neuron)
+          (* (neuron-fixed-input neuron)
+             (neuron-bias-weight neuron)))
+    (map nil #'(lambda (input-neuron w)
+                 (incf (neuron-in neuron)
+                       (* w (neuron-a input-neuron))))
+         prev-layer (neuron-in-weights neuron))
+    (setf (neuron-a neuron)
+          (funcall (neuron-g neuron) (neuron-in neuron)))))
+
+(defun forpropagation (network)
+  "Propogate inputs of NETWORK forward to compute outputs. NETWORK is
+  modified."
+  (labels ((forprop (net prev-net)
+             (if net
+                 (progn
+                   (compute-layer-output (car net) (car prev-net))
+                   (forprop (cdr net) (cdr prev-net))))))
+    (forprop (cdr network) network)))
+
+(defun backpropagation (network datum alpha)
+  "Propagate inputs of NETWORK forward to compute outputs, then
+   propagate deltas backward and update weights. NETWORK is modified."
+  (labels
+      ((backprop (net prev-net datum alpha &key (depth 0))
+         (if (null net)
+             ;; When net is null, we've reached the bottom and prev-net
+             ;; contains only the output layer. Set output deltas.
+             (mapc #'(lambda (neuron y)
+                       (setf (neuron-delta neuron)
+                             (* (funcall (neuron-dg neuron) (neuron-in neuron))
+                                (- y (neuron-a neuron)))))
+                   (car prev-net) (cadr datum))
+             (progn
+               ;; propagate inputs forward
+               (compute-layer-output (car net) (car prev-net))
+               (backprop (cdr net) (cdr prev-net) datum alpha :depth (1+ depth))
+
+               ;; propagate deltas backward and update weights on the way back up
+               (let ((layer (car prev-net))
+                     (next-layer (car net)))
+                 ;; compute deltas for layer if layer is not input layer
+                 (if (/= depth 0)
+                     (mapc #'(lambda (neuron i)
+                               (setf (neuron-delta neuron)
+                                     (* (funcall (neuron-dg neuron) (neuron-in neuron))
+                                        (reduce #'+ next-layer
+                                                :key #'(lambda (output-neuron)
+                                                         (* (elt (neuron-in-weights output-neuron) i)
+                                                            (neuron-delta output-neuron)))))))
+                           layer (iota (length layer))))
+                 ;; update input weights of next-layer
+                 (dolist (output-neuron next-layer)
+                   (incf (neuron-bias-weight output-neuron)
+                         (* alpha
+                            (neuron-fixed-input output-neuron)
+                            (neuron-delta output-neuron)))
+                   (setf (neuron-in-weights output-neuron)
+                         (map '(vector double-float)
+                              #'(lambda (w neuron)
+                                  (+ w (* alpha
+                                          (neuron-a neuron)
+                                          (neuron-delta output-neuron))))
+                              (neuron-in-weights output-neuron) layer))))))))
+    (backprop (cdr network) network datum alpha :depth 0)))
+
+(defun learn (network data &key (alpha 0.1) (epochs 100))
+  "Train NETWORK on DATA using backpropogation. DATA is in the
+   form ((inputs) (outputs)). NETWORK is modified."
+  (do ((epoch 0 (1+ epoch)))
+      ((= epoch epochs) network)
+    (dolist (datum data)
+      (set-inputs network datum)
+      (backpropagation network datum alpha))))
+
 (defun think (network data &key (boolean-output nil))
   "Apply (presumable trained) NETWORK to DATA. Data is in the
   form ((inputs) (outputs)). Return a list of lists, where each inner
@@ -209,9 +243,9 @@
       ;; set input layer outputs
       (set-inputs network datum)
       ;; propogate inputs forward
-      (forward-prop network)
-      (push (map 'list #'neuron-a
-                 (elt network (1- (length network)))) results))
+      (forpropagation network)
+      (push (mapcar #'neuron-a (car (last network)))
+            results))
     (setf results (reverse results))
 
     (if boolean-output
@@ -225,7 +259,7 @@
                                   (count 'b class-results)
                                   (count 'c class-results)
                                   (count 'd class-results)))
-                        (apply #'mapcar #'list              ; zip (transpose) lists
+                        (apply #'mapcar #'list    ; zip (transpose) lists
                                ;; replace outupt with symbol representing which count it
                                ;; should be added to (A, B, C, or D) for its class
                                (mapcar #'(lambda (result expected-result)
@@ -237,51 +271,3 @@
                                                    result expected-result))
                                        results expected-results))))))
   (values results metrics)))
-
-(defun learn (network training-data &key (alpha 0.1) (epochs 100))
-  "Train NETWORK on TRAINING-DATA using back-propogation. DATA is in
-   the form ((inputs) (outputs))."
-  (do ((num-layers (length network))
-       (epoch 0 (1+ epoch)))
-      ((= epoch epochs) network)
-    (dolist (datum training-data)
-      ;; set input layer outputs
-      (set-inputs network datum)
-      ;; propogate inputs forward
-      (forward-prop network)
-      ;; set output layer deltas
-      (map nil #'(lambda (neuron y)
-                   (setf (neuron-delta neuron)
-                         (* (funcall (neuron-dg neuron) (neuron-in neuron))
-                            (- y (neuron-a neuron)))))
-           (aref network (1- num-layers)) (cadr datum))
-      ;; propogate deltas backward
-      (map-iota #'(lambda (n)
-                    (let ((layer (elt network n))
-                          (next-layer (elt network (1+ n)))
-                          (i 0))
-                      (dolist (neuron layer)
-                        ;; compute delta
-                        (setf (neuron-delta neuron) 0.0)
-                        (dolist (output-neuron next-layer)
-                          (incf (neuron-delta neuron)
-                                (* (elt (neuron-in-weights output-neuron) i)
-                                   (neuron-delta output-neuron))))
-                        (setf (neuron-delta neuron)
-                              (* (funcall (neuron-dg neuron) (neuron-in neuron))
-                                 (neuron-delta neuron)))
-                      (incf i))
-                      ;; update input weights of next-layer
-                      (dolist (output-neuron next-layer)
-                        (incf (neuron-bias-weight output-neuron)
-                              (* alpha
-                                 (neuron-fixed-input output-neuron)
-                                 (neuron-delta output-neuron)))
-                        (setf (neuron-in-weights output-neuron)
-                              (map '(vector float)
-                                   #'(lambda (w neuron)
-                                       (+ w (* alpha
-                                               (neuron-a neuron)
-                                               (neuron-delta output-neuron))))
-                                   (neuron-in-weights output-neuron) layer)))))
-                (- num-layers 1) :start (- num-layers 2) :step -1))))
